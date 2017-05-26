@@ -186,3 +186,7 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.gitignore.io/api/python,pycharm,windows
+
+
+# Config
+config/user.ini
