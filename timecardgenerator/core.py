@@ -3,6 +3,10 @@ import logging
 import configparser
 import tkinter
 import pyodbc
+import openpyxl.utils
+import arrow
+import datetime
+import time
 
 # Utilities
 from timecardgenerator import components, helpers, models, tuples
@@ -48,7 +52,7 @@ class TimecardGenerator( object ):
         self._create_gui()
 
         # Connect to Database
-        # self._db_connect()
+        self._db_connect()
 
         logging.info( 'Sage 300 Timecard Generator initialized' )
 
@@ -64,16 +68,32 @@ class TimecardGenerator( object ):
 
         # Retrieve Spreadsheet Data
         # Dates, Employees, Employee Hours etc...
+        logging.info( 'Retrieving spreadsheet data...' )
+        self.get_dates()
+        self.get_employees()
+        self.get_hours()
 
 
         # Remove employees without hours
+        logging.info( 'Ignoring employees without hours this pay-period...' )
+        no_hours = []
+        for id, employee in self.employees.items():
+            if ( len( employee.hours ) == 0 ):
+                no_hours.append( id )
+
+        for id in no_hours:
+            logging.info( 'Removing employee with id \'{0}\' without hours'.format( id ) )
+            del self.employees[id]
 
 
         # Retrieve Employee Database data
+        logging.info( 'Retrieving Employee database data...' )
+        self.query_employee_data()
 
 
         # Generate Timesheet
-        timecard_name = self.gui.get_widget( 'field_timecard' ).get()
+        logging.info( 'Generating Timecard \'{0}\''.format( self.gui.get_widget( 'field_timecard' ).get() ) )
+        self.spreadsheet.generate( employees=self.employees )
 
 
 
@@ -157,17 +177,17 @@ class TimecardGenerator( object ):
         # Add Inputs #
         field_timecard_label = self.gui.add_widget(
             'field_timecard_label',
-            self.create_styled_label( body, text='Timecard:' )
+            self._create_styled_label( body, text='Timecard:' )
         )
 
         field_timecard = self.gui.add_widget(
             'field_timecard',
-            self.create_styled_entry( body )
+            self._create_styled_entry( body )
         )
 
         button_run = self.gui.add_widget(
             'button_run',
-            self.create_styled_button( footer, text='Run', command=self.generate )
+            self._create_styled_button( footer, text='Run', command=self.generate )
         )
 
 
@@ -191,7 +211,7 @@ class TimecardGenerator( object ):
         button_run.grid( row=0, column=0, sticky='nsew', **ipad )
 
 
-    def create_styled_label( self, frame, text ):
+    def _create_styled_label( self, frame, text ):
         return tkinter.Label(
             frame,
             text=text,
@@ -202,7 +222,7 @@ class TimecardGenerator( object ):
         )
 
 
-    def create_styled_entry( self, frame, textvariable=None ):
+    def _create_styled_entry( self, frame, textvariable=None ):
         return tkinter.Entry(
             frame,
             textvariable=textvariable,
@@ -217,7 +237,7 @@ class TimecardGenerator( object ):
         )
 
 
-    def create_styled_button( self, frame, text, command ):
+    def _create_styled_button( self, frame, text, command ):
         return tkinter.Button(
             frame,
             text=text,
@@ -259,3 +279,191 @@ class TimecardGenerator( object ):
             )
         )
         self._db = self._dbConnect.cursor()
+
+
+    def query_employee_data( self ):
+
+        for id, employee in self.employees.items():
+
+            # Retrieves database data for employees by their id
+            self._db.execute("""
+            SELECT
+                employee.OTSCHED,
+                detail.CATEGORY,
+                dist.EARNDED,
+                dist.DISTCODE,
+                dist.EXPACCT,
+                dist.OTACCT
+            FROM CPEMPL employee, CPEMPD detail, CPDIST dist
+            WHERE employee.EMPLOYEE = detail.EMPLOYEE
+            AND detail.EARNDED		= dist.EARNDED
+            AND dist.DISTCODE		= detail.DISTCODE
+            AND dist.AUDTUSER		= employee.AUDTUSER
+            AND dist.EARNDED		= ?
+            AND employee.EMPLOYEE	= ?
+            """,
+            'HRLY',
+            id )
+
+            data = self._db.fetchone()
+
+            if ( data == None ):
+                self.gui.show_error(
+                    title='Database Query Error!',
+                    message='Could not locate employee with id \'{0}\' in DB\n\n Will skip employee to continue...'.format( id )
+                )
+                continue
+
+            coordinates = [ 'Y',        'E',       'F',       'BB',       'T',       'V'  ]
+            keys        = [ 'OTSCHED', 'CATEGORY', 'EARNDED', 'DISTCODE', 'EXPACCT', 'OTACCT' ]
+
+            for i, value in enumerate( data ):
+                # Strip whitespace
+                if ( type( value ) == str ):
+                    value = value.replace( ' ', '' )
+                    value = value.replace( '-', '' )
+
+                    try:
+                        value = int( value )
+                    except:
+                        pass
+
+                    print( value )
+
+                # Add Employee data
+                employee.data.add(
+                    coordinates[i],
+                    {
+                        'key': keys[i],
+                        'value': value
+                    }
+                )
+
+
+
+    #             #
+    # SPREADSHEET #
+    #             #
+    def get_dates( self ):
+        """
+        Retrieves dates from the spreadsheet
+
+        :returns: namedtuple
+        """
+        assert not ( self.spreadsheet == None ), 'Spreadsheet must be set before employees can be retrieved'
+
+        weeks = [{}]
+
+        def loop( cell, coordinate ):
+
+            if ( type( cell.value ) == datetime.datetime ):
+
+                day = arrow.get( cell.value )
+
+                if ( day > arrow.get( time.gmtime(0) ).replace( day=+1 ) ):
+
+                    weekday = day.format( 'dddd' )
+
+                    # Creates a new week when an existing day has been found in the latest week
+                    if ( weekday in weeks[-1] ):
+                        weeks.append({})
+
+                    weeks[-1][weekday] = tuples.WeekDay( date=day, coordinate=coordinate )
+
+        self.spreadsheet.loop_sheet(
+            tuples.Coordinates( start=self.spreadsheet.min_coordinate(), end=self.spreadsheet.max_coordinate() ),
+            loop
+        )
+
+        # Extracts the weeks into namedtuples
+        for i, week in enumerate( weeks ):
+            weeks[i] = tuples.SheetDates( **week )
+
+        logging.info( 'Retrieved workdays from spreadsheet' )
+
+        self.dates = weeks
+
+
+    def get_employees( self ):
+        """
+        Retrieves employees from spreadsheet
+        """
+        assert not ( self.spreadsheet == None ), 'Spreadsheet must be set before employees can be retrieved'
+
+        employees = {}
+        periodend = self.dates[-1][-1].date.date()
+        payperiod = self.gui.get_widget( 'field_timecard' ).get()
+
+        def loop( cell, coordinate ):
+            if not ( cell.value == None ):
+
+                if not ( cell.value in employees ):
+                    new_employee = models.Employee( id=cell.value, coordinates=cell.coordinate )
+                    new_employee.data.add( 'A', {
+                            'key': 'id',
+                            'value': cell.value
+                        }
+                    )
+                    new_employee.data.add( 'B', {
+                            'key': 'periodend',
+                            'value': periodend
+                        }
+                    )
+                    new_employee.data.add( 'C', {
+                            'key': 'payperiod',
+                            'value': payperiod
+                        }
+                    )
+                    employees[cell.value] = new_employee
+                else:
+                    employees[cell.value].coordinates.append( cell.coordinate )
+
+        start = self.spreadsheet.min_coordinate()
+
+        # Modify end to encompass only the first column
+        end = openpyxl.utils.coordinate_from_string( self.spreadsheet.max_coordinate() )
+        end = '{0}{1}'.format( start[0], end[1] )
+
+        self.spreadsheet.loop_sheet(
+            tuples.Coordinates( start=start, end=end ),
+            loop
+        )
+
+        logging.info( 'Retreived employees from Spreadsheet' )
+
+        self.employees = employees
+
+
+    def get_hours( self ):
+        """
+        Acquires each employees clocked hours from the spreadsheet
+        """
+        employees = self.employees
+
+        def loop( cell, coordinate ):
+
+            if not ( cell.value == None ) and ( type( cell.value ) == datetime.time ):
+                #
+                employee_coordinate = openpyxl.utils.coordinate_from_string( self.spreadsheet.min_coordinate() )
+                employee_coordinate = '{0}{1}'.format( employee_coordinate[0], coordinate[1] )
+                employee_key        = self.spreadsheet.get_cell( employee_coordinate )
+
+                if ( employee_coordinate in employees[employee_key].coordinates ):
+                    # Get Date
+                    date = None
+
+                    for week in self.dates:
+                        for day in week:
+                            if ( day.coordinate.column == coordinate.column ) and ( day.coordinate.row < coordinate.row ):
+                                date = day
+
+                    # Append new hours to employee
+                    self.employees[employee_key].add_hours( date, cell.value )
+
+        #
+        self.spreadsheet.loop_sheet(
+            tuples.Coordinates( start=self.spreadsheet.min_coordinate(), end=self.spreadsheet.max_coordinate() ),
+            loop
+        )
+
+        logging.info( 'Retrieved employee hours' )
