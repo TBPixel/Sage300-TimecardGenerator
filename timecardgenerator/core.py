@@ -328,8 +328,6 @@ class TimecardGenerator( object ):
                     except:
                         pass
 
-                    print( value )
-
                 # Add Employee data
                 employee.data.add(
                     coordinates[i],
@@ -344,6 +342,116 @@ class TimecardGenerator( object ):
     #             #
     # SPREADSHEET #
     #             #
+    def _get_employee_coordinate( self, coordinate ):
+        """
+        Return possible coordinate of employee given a coordinate row to check
+        
+        :param coordinate: tuples.Coordinate
+        :return: tuples.Coordinate
+        """
+        sheet_min = openpyxl.utils.coordinate_from_string( self.spreadsheet.min_coordinate() )
+        sheet_min = tuples.Coordinate( column=sheet_min[0], row=sheet_min[1] )
+
+        return tuples.Coordinate( column=sheet_min.column, row=coordinate.row )
+
+
+    def _get_employee_from_coordinate( self, coordinate ):
+        """
+        Return employee found at given coordinate
+        
+        :param coordinate: tuples.Coordinate
+        :return: models.Employee
+        """
+        coord = self._get_employee_coordinate( coordinate )
+        key   = self.spreadsheet.get_cell( '{0}{1}'.format( coord.column, coord.row ) )
+
+        if not key in self.employees:
+            return
+
+        return self.employees[key]
+
+
+    def _is_datetime( self, data ):
+        """
+        Return if passed data is datetime object
+        
+        :param data: any
+        :return: boolean
+        """
+        # Datetime object
+        if ( not type( data ) == datetime.datetime ):
+            return False
+
+        # Datetime string
+        if ( type( data ) == str ):
+            try:
+                datetime.datetime.strptime( data, '%x' )
+            except:
+                return False
+
+        return True
+
+
+    def _is_time( self, data ):
+        """
+        Return if passed data is time object
+        
+        :param data: data
+        :return: boolean
+        """
+        # Type Checking
+        if data == None or type( data ) == int or type( data ) == bool:
+            return False
+
+        # string or datetime object
+        if type( data ) == str or type( data ) == datetime.datetime:
+            try:
+                date = arrow.get( data )
+            except:
+                return False
+
+            excel = arrow.get( 1900, 1, 1 )
+
+            if date > excel:
+                return False
+
+        return True
+
+
+    def _is_end_of_week( self, week: dict, weekday: arrow ):
+        """
+        Return if passed weekday is in the given week
+        
+        :param week: dict
+        :param weekday: arrow
+        :return: boolean
+        """
+        if ( not weekday in week ):
+            return False
+
+        return True
+
+
+    def _is_employee_row( self, coordinate ):
+        """
+        Return if given coordinate exists within employees coordinates list
+        
+        :param coordinate: tuples.Coordinate
+        :return: boolean
+        """
+        sheet_coordinate = self.spreadsheet.min_coordinate()
+        coord            = tuples.Coordinate( column=sheet_coordinate[0], row=coordinate.row )
+        employee         = self._get_employee_from_coordinate( coord )
+
+        if not employee:
+            return False
+
+        if not coord in employee.coordinates:
+            return False
+
+        return True
+
+
     def get_dates( self ):
         """
         Retrieves dates from the spreadsheet
@@ -352,23 +460,24 @@ class TimecardGenerator( object ):
         """
         assert not ( self.spreadsheet == None ), 'Spreadsheet must be set before employees can be retrieved'
 
+        logging.info( 'Retrieving Dates...' )
+
         weeks = [{}]
 
         def loop( cell, coordinate ):
 
-            if ( type( cell.value ) == datetime.datetime ):
+            # Data is datetime and not datetime.time
+            if self._is_datetime( cell.value ) and ( not self._is_time( cell.value ) ):
 
-                day = arrow.get( cell.value )
+                day     = arrow.get( cell.value )
+                weekday = day.format( 'dddd' )
 
-                if ( day > arrow.get( time.gmtime(0) ).replace( day=+1 ) ):
+                # Creates a new week when an existing day has been found in the latest week
+                if self._is_end_of_week( weeks[-1], weekday ):
+                    weeks.append({})
 
-                    weekday = day.format( 'dddd' )
-
-                    # Creates a new week when an existing day has been found in the latest week
-                    if ( weekday in weeks[-1] ):
-                        weeks.append({})
-
-                    weeks[-1][weekday] = tuples.WeekDay( date=day, coordinate=coordinate )
+                # Append new weekday to week dict
+                weeks[-1][weekday] = tuples.WeekDay( date=day, coordinate=coordinate )
 
         self.spreadsheet.loop_sheet(
             tuples.Coordinates( start=self.spreadsheet.min_coordinate(), end=self.spreadsheet.max_coordinate() ),
@@ -390,15 +499,17 @@ class TimecardGenerator( object ):
         """
         assert not ( self.spreadsheet == None ), 'Spreadsheet must be set before employees can be retrieved'
 
+        logging.info( 'Retrieving Employees...' )
+
         employees = {}
         periodend = self.dates[-1][-1].date.date()
         payperiod = self.gui.get_widget( 'field_timecard' ).get()
 
         def loop( cell, coordinate ):
-            if not ( cell.value == None ):
+            if not cell.value == None:
+                if not cell.value in employees:
 
-                if not ( cell.value in employees ):
-                    new_employee = models.Employee( id=cell.value, coordinates=cell.coordinate )
+                    new_employee = models.Employee( id=cell.value, coordinates=coordinate )
                     new_employee.data.add( 'A', {
                             'key': 'id',
                             'value': cell.value
@@ -416,8 +527,9 @@ class TimecardGenerator( object ):
                     )
                     employees[cell.value] = new_employee
                 else:
-                    employees[cell.value].coordinates.append( cell.coordinate )
+                    employees[cell.value].coordinates.append( coordinate )
 
+        # Get starting coordinate of loop
         start = self.spreadsheet.min_coordinate()
 
         # Modify end to encompass only the first column
@@ -438,29 +550,26 @@ class TimecardGenerator( object ):
         """
         Acquires each employees clocked hours from the spreadsheet
         """
-        employees = self.employees
+        logging.info( 'Retrieving Employee Hours...' )
 
         def loop( cell, coordinate ):
 
-            if not ( cell.value == None ) and ( type( cell.value ) == datetime.time ):
-                #
-                employee_coordinate = openpyxl.utils.coordinate_from_string( self.spreadsheet.min_coordinate() )
-                employee_coordinate = '{0}{1}'.format( employee_coordinate[0], coordinate[1] )
-                employee_key        = self.spreadsheet.get_cell( employee_coordinate )
+            if self._is_time( cell.value ) and self._is_employee_row( coordinate ):
+                # Get Date
+                date     = None
+                employee = self._get_employee_from_coordinate( coordinate )
 
-                if ( employee_coordinate in employees[employee_key].coordinates ):
-                    # Get Date
-                    date = None
+                # Loop weeks
+                for week in self.dates:
+                    # Loop days of week
+                    for day in week:
+                        # Ensure same column and find the oldest parental row of dates
+                        if ( day.coordinate.column == coordinate.column ) and ( day.coordinate.row < coordinate.row ):
+                            date = day
 
-                    for week in self.dates:
-                        for day in week:
-                            if ( day.coordinate.column == coordinate.column ) and ( day.coordinate.row < coordinate.row ):
-                                date = day
+                # Append new hours to employee
+                employee.add_hours( date, cell.value )
 
-                    # Append new hours to employee
-                    self.employees[employee_key].add_hours( date, cell.value )
-
-        #
         self.spreadsheet.loop_sheet(
             tuples.Coordinates( start=self.spreadsheet.min_coordinate(), end=self.spreadsheet.max_coordinate() ),
             loop
