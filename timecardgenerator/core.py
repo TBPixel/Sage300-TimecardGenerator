@@ -410,13 +410,38 @@ class TimecardGenerator( object ):
             except:
                 return False
 
-            excel = arrow.get( 1900, 1, 1 )
+            excel = arrow.get( 1899, 12, 31 )
 
             if date > excel:
                 return False
 
         return True
 
+
+    def _is_greater_than_zero_time( self, data ):
+        """
+        Return if passed data is time greater than 00:00
+
+        :param data: data
+        :return: boolean
+        """
+        # Type Checking
+        if data == None or type( data ) == int or type( data ) == bool:
+            return False
+
+        # string or datetime object
+        if type( data ) == str or type( data ) == datetime.datetime or type( data ) == datetime.time:
+            try:
+                date = arrow.get( data )
+            except:
+                date = arrow.get( datetime.time.strftime( data, '%Y-%m-%d %H:%M:%S' ) )
+
+            zero = arrow.get( 1899, 12, 30 )
+
+            if date <= zero:
+                return False
+
+        return True
 
     def _is_end_of_week( self, week: dict, weekday: arrow ):
         """
@@ -506,28 +531,27 @@ class TimecardGenerator( object ):
         payperiod = self.gui.get_widget( 'field_timecard' ).get()
 
         def loop( cell, coordinate ):
-            if not cell.value == None:
-                if not cell.value in employees:
+            if not cell.value in employees:
 
-                    new_employee = models.Employee( id=cell.value, coordinates=coordinate )
-                    new_employee.data.add( 'A', {
-                            'key': 'id',
-                            'value': cell.value
-                        }
-                    )
-                    new_employee.data.add( 'B', {
-                            'key': 'periodend',
-                            'value': periodend
-                        }
-                    )
-                    new_employee.data.add( 'C', {
-                            'key': 'payperiod',
-                            'value': payperiod
-                        }
-                    )
-                    employees[cell.value] = new_employee
-                else:
-                    employees[cell.value].coordinates.append( coordinate )
+                new_employee = models.Employee( id=cell.value, coordinates=coordinate )
+                new_employee.data.add( 'A', {
+                        'key': 'id',
+                        'value': cell.value
+                    }
+                )
+                new_employee.data.add( 'B', {
+                        'key': 'periodend',
+                        'value': periodend
+                    }
+                )
+                new_employee.data.add( 'C', {
+                        'key': 'payperiod',
+                        'value': payperiod
+                    }
+                )
+                employees[cell.value] = new_employee
+            else:
+                employees[cell.value].coordinates.append( coordinate )
 
         # Get starting coordinate of loop
         start = self.spreadsheet.min_coordinate()
@@ -554,7 +578,7 @@ class TimecardGenerator( object ):
 
         def loop( cell, coordinate ):
 
-            if self._is_time( cell.value ) and self._is_employee_row( coordinate ):
+            if self._is_time( cell.value ) and self._is_greater_than_zero_time( cell.value ) and self._is_employee_row( coordinate ):
                 # Get Date
                 date     = None
                 employee = self._get_employee_from_coordinate( coordinate )
