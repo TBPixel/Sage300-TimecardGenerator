@@ -167,6 +167,10 @@ class Spreadsheet( object ):
         for row in self.sheet[loop.start: loop.end]:
 
             for cell in row:
+                # Skip Empty Cells
+                if cell.value == None:
+                    continue
+
                 coordinate = utils.coordinate_from_string( cell.coordinate )
                 coordinate = tuples.Coordinate( column=coordinate[0], row=coordinate[1] )
                 callback( cell, coordinate )
