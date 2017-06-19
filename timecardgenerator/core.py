@@ -6,10 +6,9 @@ import pyodbc
 import openpyxl.utils
 import arrow
 import datetime
-import time
 
 # Utilities
-from timecardgenerator import components, helpers, models, tuples
+from timecardgenerator import components, models, tuples
 
 
 
@@ -65,6 +64,14 @@ class TimecardGenerator( object ):
         """
         Generate the importable spreadsheet template
         """
+
+        # Ensure Spreadsheet is set
+        if self.spreadsheet == None:
+            self.gui.show_error(
+                title='Run Error!',
+                message='No spreadsheet set before running application!\nUse file->Open Spreadsheet'
+            )
+            return
 
         # Retrieve Spreadsheet Data
         # Dates, Employees, Employee Hours etc...
@@ -177,7 +184,7 @@ class TimecardGenerator( object ):
         # Add Inputs #
         field_timecard_label = self.gui.add_widget(
             'field_timecard_label',
-            self._create_styled_label( body, text='Timecard:' )
+            self._create_styled_label( body, text='PayPeriod:' )
         )
 
         field_timecard = self.gui.add_widget(
@@ -541,7 +548,7 @@ class TimecardGenerator( object ):
                 )
                 new_employee.data.add( 'C', {
                         'key': 'payperiod',
-                        'value': payperiod
+                        'value': payperiod.upper()
                     }
                 )
                 employees[cell.value] = new_employee
