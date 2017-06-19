@@ -8,7 +8,7 @@ import arrow
 import datetime
 
 # Utilities
-from timecardgenerator import components, models, tuples
+from timecardgenerator import components, models, helpers, tuples
 
 
 
@@ -38,11 +38,8 @@ class TimecardGenerator( object ):
 
         # Read Configuration
         self.config = configparser.ConfigParser()
-        config_file = os.path.abspath(
-            os.path.join(
-                os.path.dirname( __file__ ), '../{0}'.format( 'config/user.ini' )
-            )
-        )
+
+        config_file = helpers.resource_path( 'user-settings.ini' )
         self.config.read( config_file )
 
         logging.info( 'Opened configuration file {0}'.format( config_file ) )
