@@ -482,8 +482,6 @@ class TimecardGenerator( object ):
     def get_dates( self ):
         """
         Retrieves dates from the spreadsheet
-
-        :returns: namedtuple
         """
         assert not ( self.spreadsheet == None ), 'Spreadsheet must be set before employees can be retrieved'
 
@@ -513,7 +511,13 @@ class TimecardGenerator( object ):
 
         # Extracts the weeks into namedtuples
         for i, week in enumerate( weeks ):
-            weeks[i] = tuples.SheetDates( **week )
+            try:
+                weeks[i] = tuples.SheetDates( **week )
+            except:
+                self.gui.show_error(
+                    title='Date Registration Error!',
+                    message='Partial weeks cannot be generated ( less than 7 days ).'
+                )
 
         logging.info( 'Retrieved workdays from spreadsheet' )
 
