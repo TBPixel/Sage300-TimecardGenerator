@@ -189,5 +189,5 @@ $RECYCLE.BIN/
 
 
 # Config
-config/user-settings.ini
+timecardgenerator/*.ini
 timecardgenerator/*.xlsx

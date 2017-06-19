@@ -106,6 +106,11 @@ class GUI( object ):
 
         return file
 
+
+    def show_alert( self, title='Alert', message='' ):
+        messagebox.showinfo( title, message )
+
+
     def show_error( self, title='Error', message='' ):
         messagebox.showerror( title, message )
 

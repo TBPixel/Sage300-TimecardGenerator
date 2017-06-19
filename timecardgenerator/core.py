@@ -99,6 +99,12 @@ class TimecardGenerator( object ):
         logging.info( 'Generating Timecard \'{0}\''.format( self.gui.get_widget( 'field_timecard' ).get() ) )
         self.spreadsheet.generate( employees=self.employees )
 
+        # Complete
+        self.gui.show_alert(
+            title='Done!',
+            message='A new GENERATED-TIMECARDS.xlsx can be found in Sage300 Timecard Generator directory.'
+        )
+
 
 
     #     #
