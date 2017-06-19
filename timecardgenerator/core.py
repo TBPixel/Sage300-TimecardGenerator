@@ -323,11 +323,6 @@ class TimecardGenerator( object ):
                     value = value.replace( ' ', '' )
                     value = value.replace( '-', '' )
 
-                    try:
-                        value = int( value )
-                    except:
-                        pass
-
                 # Add Employee data
                 employee.data.add(
                     coordinates[i],
